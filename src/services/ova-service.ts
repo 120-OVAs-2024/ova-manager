@@ -17,7 +17,7 @@ class OvaService {
         return OvaService.instance;
     }
 
-    async fetchOvas(): Promise<{ message: string; data: Ova[] } | { message: string; data: [] }> {
+    async fetchOvas(): Promise<{ message: string; data: Ova[] }> {
         try {
             const response = await fetch(this.ApiURL, {
                 method: 'GET',
@@ -38,16 +38,16 @@ class OvaService {
             };
         } catch (error) {
             console.error("Error fetching data from API:", error);
-            return {
-                message: "Error fetching data from API",
-                data: []
-            }
+            throw error instanceof Error ? error : new Error('Error fetching data from API');
         }
     }
 
-    async fetchOvaGroups(): Promise<{ message: string; data: string[] } | { message: string; data: [] }> {
+    async fetchOvaGroups(): Promise<{ message: string; data: string[] }> {
         try {
             const response = await fetch(`${this.ApiURL}/groups`);
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
             const data: string[] = await response.json();
 
             return {
@@ -57,14 +57,11 @@ class OvaService {
         }
         catch (error) {
             console.error("Error fetching groups from API:", error);
-            return {
-                message: "Error fetching groups from API",
-                data: []
-            }
+            throw error instanceof Error ? error : new Error('Error fetching groups from API');
         }
     }
 
-    async fetchOvaZip(id: string): Promise<{ message: string; data: string } | { data: null; message: string }> {
+    async fetchOvaZip(id: string): Promise<{ message: string; data: string }> {
         try {
             const response = await fetch(`${this.ApiURL}/zip/${id}`);
             if (!response.ok) {
@@ -79,11 +76,8 @@ class OvaService {
                 data: url,
             };
         } catch (error) {
-            console.error("Error fetching data from API:", error);
-            return {
-                message: "Error generated zip",
-                data: null,
-            }
+            console.error("Error fetching zip from API:", error);
+            throw error instanceof Error ? error : new Error('Error generating zip');
         }
     }
 
