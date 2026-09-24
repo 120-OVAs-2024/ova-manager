@@ -1,8 +1,7 @@
-import { useRef } from 'react';
+import { useState } from 'react';
 import confetti from 'canvas-confetti';
 import { Link } from 'lucide-react';
 import { toast } from 'sonner';
-import { useMutation } from '@tanstack/react-query';
 
 import ovaService from '@/services/ova-service';
 import type { Ova } from '@/types/ova';
@@ -11,39 +10,16 @@ import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardFooter, CardHeader } from '../ui/card';
 
+// The download button stays disabled for a moment after a click so the same ZIP is not requested twice by mistake.
+const DOWNLOAD_START_COOLDOWN_MS = 3_000;
+
 interface Props {
   ova?: Ova;
   viewMode?: 'grid' | 'list';
 }
 
 export const OvaCard: React.FC<Props> = ({ ova, viewMode = 'grid' }) => {
-  const toastIdRef = useRef<string | number | undefined>(undefined);
-
-  const mutation = useMutation({
-    mutationFn: (id: string) => ovaService.fetchOvaZip(id),
-    onMutate: () => {
-      toastIdRef.current = toast.loading('Preparing download…', {
-        description: 'Creating the ZIP file, please wait.'
-      });
-    },
-    onSuccess: (zip) => {
-      toast.success('Download ready! 📁', {
-        id: toastIdRef.current,
-        duration: 5000,
-        description: 'Your ZIP file has been downloaded.'
-      });
-
-      throwConfetti();
-      handleDownload(zip.data);
-    },
-    onError: () => {
-      toast.error('Download failed 📁', {
-        id: toastIdRef.current,
-        duration: 5000,
-        description: 'Please try again later.'
-      });
-    }
-  });
+  const [isStarting, setIsStarting] = useState(false);
 
   // Function to navigate to the OVA's URL in a new tab
   const handleNavigateToTheOva = () => {
@@ -51,20 +27,27 @@ export const OvaCard: React.FC<Props> = ({ ova, viewMode = 'grid' }) => {
     window.open(ova.ovaPath, '_blank');
   };
 
-  // Function to trigger the download of a file from a given URL
-  const handleDownload = (url: string) => {
+  // Function to hand the OVA zip download over to the browser. The API answers with
+  // `Content-Disposition: attachment` and streams the ZIP, so it starts downloading right away
+  // (with the browser's own progress) instead of being buffered in memory first.
+  const handleZip = () => {
+    if (!ova) return;
+
     const a = document.createElement('a');
-    a.href = url;
-    a.download = `${ova?.title}.zip`;
+    a.href = ovaService.getOvaZipUrl(ova.id);
+    a.download = ''; // Use the file name sent by the API
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-  };
 
-  // Function to handle the creation and download of the OVA zip file
-  const handleZip = async () => {
-    if (!ova) return;
-    mutation.mutate(ova.id);
+    toast.success('Download started 📁', {
+      duration: 5000,
+      description: 'Follow the progress in your browser downloads.'
+    });
+    throwConfetti();
+
+    setIsStarting(true);
+    setTimeout(() => setIsStarting(false), DOWNLOAD_START_COOLDOWN_MS);
   };
 
   // Function to copy the OVA link to the clipboard
@@ -74,8 +57,10 @@ export const OvaCard: React.FC<Props> = ({ ova, viewMode = 'grid' }) => {
     toast.success('Link copied to clipboard \uD83D\uDD17', { duration: 3000 });
   };
 
-  // Function to trigger a confetti animation for 2 seconds
+  // Function to trigger a confetti animation for 2 seconds (skipped when the user asks for reduced motion)
   const throwConfetti = () => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
     const timeEnd = Date.now() + 2 * 1000; // Set the end time for the animation (2 seconds from now)
     const colors = ['#FF0D72', '#0ABDE3', '#F9C80E', '#FF477E', '#F9C80E']; // Define the colors for the confetti
 
@@ -137,13 +122,28 @@ export const OvaCard: React.FC<Props> = ({ ova, viewMode = 'grid' }) => {
           <Button variant="neutral" size="sm" className="flex-1 md:flex-none" onClick={handleNavigateToTheOva}>
             Go to the OVA
           </Button>
-          <Button size="sm" className="flex-1 md:flex-none" onClick={handleZip} disabled={mutation.isPending}>
-            {mutation.isPending ? (
-              <svg aria-hidden="true" role="status" className="inline w-4 h-4 text-gray-200 animate-spin dark:text-gray-600" viewBox="0 0 100 101" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M100 50.5908C100 78.2051 77.6142 100.591 50 100.591C22.3858 100.591 0 78.2051 0 50.5908C0 22.9766 22.3858 0.59082 50 0.59082C77.6142 0.59082 100 22.9766 100 50.5908ZM9.08144 50.5908C9.08144 73.1895 27.4013 91.5094 50 91.5094C72.5987 91.5094 90.9186 73.1895 90.9186 50.5908C90.9186 27.9921 72.5987 9.67226 50 9.67226C27.4013 9.67226 9.08144 27.9921 9.08144 50.5908Z" fill="currentColor" />
-                <path d="M93.9676 39.0409C96.393 38.4038 97.8624 35.9116 97.0079 33.5539C95.2932 28.8227 92.871 24.3692 89.8167 20.348C85.8452 15.1192 80.8826 10.7238 75.2124 7.41289C69.5422 4.10194 63.2754 1.94025 56.7698 1.05124C51.7666 0.367541 46.6976 0.446843 41.7345 1.27873C39.2613 1.69328 37.813 4.19778 38.4501 6.62326C39.0873 9.04874 41.5694 10.4717 44.0505 10.1071C47.8511 9.54855 51.7191 9.52689 55.5402 10.0491C60.8642 10.7766 65.9928 12.5457 70.6331 15.2552C75.2735 17.9648 79.3347 21.5619 82.5849 25.841C84.9175 28.9121 86.7997 32.2913 88.1811 35.8758C89.083 38.2158 91.5421 39.6781 93.9676 39.0409Z" fill="#121212" />
+          <Button size="sm" className="flex-1 md:flex-none" onClick={handleZip} disabled={isStarting}>
+            {isStarting ? (
+              <svg
+                aria-hidden="true"
+                role="status"
+                className="inline w-4 h-4 text-gray-200 animate-spin dark:text-gray-600"
+                viewBox="0 0 100 101"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M100 50.5908C100 78.2051 77.6142 100.591 50 100.591C22.3858 100.591 0 78.2051 0 50.5908C0 22.9766 22.3858 0.59082 50 0.59082C77.6142 0.59082 100 22.9766 100 50.5908ZM9.08144 50.5908C9.08144 73.1895 27.4013 91.5094 50 91.5094C72.5987 91.5094 90.9186 73.1895 90.9186 50.5908C90.9186 27.9921 72.5987 9.67226 50 9.67226C27.4013 9.67226 9.08144 27.9921 9.08144 50.5908Z"
+                  fill="currentColor"
+                />
+                <path
+                  d="M93.9676 39.0409C96.393 38.4038 97.8624 35.9116 97.0079 33.5539C95.2932 28.8227 92.871 24.3692 89.8167 20.348C85.8452 15.1192 80.8826 10.7238 75.2124 7.41289C69.5422 4.10194 63.2754 1.94025 56.7698 1.05124C51.7666 0.367541 46.6976 0.446843 41.7345 1.27873C39.2613 1.69328 37.813 4.19778 38.4501 6.62326C39.0873 9.04874 41.5694 10.4717 44.0505 10.1071C47.8511 9.54855 51.7191 9.52689 55.5402 10.0491C60.8642 10.7766 65.9928 12.5457 70.6331 15.2552C75.2735 17.9648 79.3347 21.5619 82.5849 25.841C84.9175 28.9121 86.7997 32.2913 88.1811 35.8758C89.083 38.2158 91.5421 39.6781 93.9676 39.0409Z"
+                  fill="#121212"
+                />
               </svg>
-            ) : 'Download'}
+            ) : (
+              'Download'
+            )}
           </Button>
         </div>
       </Card>
@@ -180,8 +180,8 @@ export const OvaCard: React.FC<Props> = ({ ova, viewMode = 'grid' }) => {
         <Button variant="neutral" onClick={handleNavigateToTheOva}>
           Go to the OVA
         </Button>
-        <Button onClick={handleZip} disabled={mutation.isPending}>
-          {mutation.isPending ? (
+        <Button onClick={handleZip} disabled={isStarting}>
+          {isStarting ? (
             <span className="flex items-center justify-center">
               <svg
                 aria-hidden="true"
@@ -189,7 +189,8 @@ export const OvaCard: React.FC<Props> = ({ ova, viewMode = 'grid' }) => {
                 className="inline w-10 h-10 text-gray-200 animate-spin dark:text-gray-600"
                 viewBox="0 0 100 101"
                 fill="none"
-                xmlns="http://www.w3.org/2000/svg">
+                xmlns="http://www.w3.org/2000/svg"
+              >
                 <path
                   d="M100 50.5908C100 78.2051 77.6142 100.591 50 100.591C22.3858 100.591 0 78.2051 0 50.5908C0 22.9766 22.3858 0.59082 50 0.59082C77.6142 0.59082 100 22.9766 100 50.5908ZM9.08144 50.5908C9.08144 73.1895 27.4013 91.5094 50 91.5094C72.5987 91.5094 90.9186 73.1895 90.9186 50.5908C90.9186 27.9921 72.5987 9.67226 50 9.67226C27.4013 9.67226 9.08144 27.9921 9.08144 50.5908Z"
                   fill="currentColor"
